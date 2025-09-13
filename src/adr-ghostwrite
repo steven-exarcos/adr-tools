@@ -1,0 +1,159 @@
+#!/bin/bash
+set -e
+eval "$($(dirname $0)/adr-config)"
+
+## usage: adr ghostwrite <adr-file-or-number>
+##
+## Sends an ADR to Google Gemini AI to expand and improve it.
+## Shows a preview of the suggested changes and asks for confirmation.
+## Requires GEMINI_API_KEY environment variable to be set.
+##
+## Examples:
+##   adr ghostwrite 0001-use-database.md
+##   adr ghostwrite 0001
+
+adr_dir=$("$adr_bin_dir/_adr_dir")
+
+# Check if ADR directory exists
+if [ ! -d "$adr_dir" ]; then
+    echo "Error: ADR directory '$adr_dir' does not exist."
+    echo "Run 'adr init' to initialize the ADR directory."
+    exit 1
+fi
+
+# Check for required arguments
+if [ $# -eq 0 ]; then
+    echo "Error: Please specify an ADR file or number."
+    echo "Usage: adr ghostwrite <adr-file-or-number>"
+    exit 1
+fi
+
+adr_input="$1"
+adr_file=""
+
+# Determine the ADR file path
+if [[ "$adr_input" =~ ^[0-9]+$ ]]; then
+    # Input is a number, find the corresponding file
+    padded_number=$(printf "%04d" "$adr_input")
+    adr_file=$(find "$adr_dir" -name "${padded_number}-*.md" | head -1)
+    if [ -z "$adr_file" ]; then
+        echo "Error: No ADR found with number $adr_input"
+        exit 1
+    fi
+elif [[ "$adr_input" == *.md ]]; then
+    # Input is a filename, check if it exists
+    if [[ "$adr_input" == */* ]]; then
+        # Full path provided
+        adr_file="$adr_input"
+    else
+        # Just filename, assume it's in the ADR directory
+        adr_file="$adr_dir/$adr_input"
+    fi
+    if [ ! -f "$adr_file" ]; then
+        echo "Error: ADR file '$adr_file' does not exist."
+        exit 1
+    fi
+else
+    echo "Error: Invalid ADR specifier '$adr_input'. Use a number (e.g., 1) or filename (e.g., 0001-title.md)"
+    exit 1
+fi
+
+# Check for API key
+if [ -z "$GEMINI_API_KEY" ]; then
+    echo "Error: GEMINI_API_KEY environment variable is required."
+    echo "Please set your Google Gemini API key:"
+    echo "export GEMINI_API_KEY=your_api_key_here"
+    exit 1
+fi
+
+echo "Processing ADR: $adr_file"
+
+# Read the existing ADR content
+if [ ! -r "$adr_file" ]; then
+    echo "Error: Cannot read ADR file '$adr_file'"
+    exit 1
+fi
+
+original_content=$(cat "$adr_file")
+
+# Prepare the prompt for Gemini
+prompt="Please expand and improve this Architecture Decision Record (ADR). Keep the same structure but make it more comprehensive and detailed. Enhance the Context, Decision, and Consequences sections with more thorough explanations. Maintain the original title and numbering. Return only the improved ADR content in markdown format:
+
+$original_content"
+
+# Create JSON payload for Gemini API
+json_payload=$(jq -n \
+    --arg prompt "$prompt" \
+    '{
+        contents: [{
+            parts: [{
+                text: $prompt
+            }]
+        }]
+    }')
+
+echo "Sending ADR to Google Gemini for improvement..."
+
+# Make API request to Gemini
+api_response=$(curl -s -X POST \
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=$GEMINI_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d "$json_payload")
+
+# Check if the API call was successful
+if [ $? -ne 0 ]; then
+    echo "Error: Failed to connect to Gemini API"
+    exit 1
+fi
+
+# Extract the improved content from the response
+improved_content=$(echo "$api_response" | jq -r '.candidates[0].content.parts[0].text // empty')
+
+if [ -z "$improved_content" ]; then
+    echo "Error: No content received from Gemini API"
+    echo "API Response: $api_response"
+    exit 1
+fi
+
+# Create temporary files for comparison
+tmp_dir=$(mktemp -d)
+original_tmp="$tmp_dir/original.md"
+improved_tmp="$tmp_dir/improved.md"
+
+echo "$original_content" > "$original_tmp"
+echo "$improved_content" > "$improved_tmp"
+
+echo ""
+echo "=== PREVIEW OF PROPOSED CHANGES ==="
+echo ""
+echo "Showing differences (- original, + improved):"
+echo ""
+
+# Show the diff
+if ! diff -u "$original_tmp" "$improved_tmp"; then
+    echo ""
+    echo "=== END OF PREVIEW ==="
+    echo ""
+    
+    # Ask for confirmation
+    echo "Do you want to apply these changes to $adr_file? (y/n): "
+    read -r response
+    
+    case "$response" in
+        [Yy]|[Yy][Ee][Ss])
+            echo "$improved_content" > "$adr_file"
+            echo "ADR has been updated successfully!"
+            ;;
+        [Nn]|[Nn][Oo])
+            echo "Changes discarded. Original ADR unchanged."
+            ;;
+        *)
+            echo "Invalid response. Changes discarded."
+            ;;
+    esac
+else
+    echo "No changes suggested by Gemini."
+fi
+
+# Cleanup
+rm -rf "$tmp_dir"

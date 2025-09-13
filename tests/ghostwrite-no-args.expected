@@ -1,0 +1,8 @@
+adr init
+doc/adr/0001-record-architecture-decisions.md
+if adr ghostwrite
+then
+    echo ERROR: should have failed
+fi
+Error: Please specify an ADR file or number.
+Usage: adr ghostwrite <adr-file-or-number>
