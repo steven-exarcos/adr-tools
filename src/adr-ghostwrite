@@ -2,15 +2,152 @@
 set -e
 eval "$($(dirname $0)/adr-config)"
 
-## usage: adr ghostwrite <adr-file-or-number>
+# Function to call Gemini API
+call_gemini_api() {
+    local prompt="$1"
+    
+    # Create JSON payload for Gemini API
+    local json_payload=$(jq -n \
+        --arg prompt "$prompt" \
+        '{
+            contents: [{
+                parts: [{
+                    text: $prompt
+                }]
+            }]
+        }')
+
+    echo "Sending ADR to Google Gemini for improvement..."
+
+    # Make API request to Gemini
+    local api_response=$(curl -s -X POST \
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=$GEMINI_API_KEY" \
+        -H "Content-Type: application/json" \
+        -d "$json_payload")
+
+    # Check if the API call was successful
+    if [ $? -ne 0 ]; then
+        echo "Error: Failed to connect to Gemini API"
+        exit 1
+    fi
+
+    # Extract the improved content from the response
+    local improved_content=$(echo "$api_response" | jq -r '.candidates[0].content.parts[0].text // empty')
+
+    if [ -z "$improved_content" ]; then
+        echo "Error: No content received from Gemini API"
+        echo "API Response: $api_response"
+        exit 1
+    fi
+
+    echo "$improved_content"
+}
+
+# Function to call Claude API
+call_claude_api() {
+    local prompt="$1"
+    
+    # Create JSON payload for Claude API
+    local json_payload=$(jq -n \
+        --arg prompt "$prompt" \
+        '{
+            model: "claude-3-haiku-20240307",
+            max_tokens: 4000,
+            messages: [{
+                role: "user",
+                content: $prompt
+            }]
+        }')
+
+    echo "Sending ADR to Anthropic Claude for improvement..."
+
+    # Make API request to Claude
+    local api_response=$(curl -s -X POST \
+        "https://api.anthropic.com/v1/messages" \
+        -H "Content-Type: application/json" \
+        -H "x-api-key: $ANTHROPIC_API_KEY" \
+        -H "anthropic-version: 2023-06-01" \
+        -d "$json_payload")
+
+    # Check if the API call was successful
+    if [ $? -ne 0 ]; then
+        echo "Error: Failed to connect to Claude API"
+        exit 1
+    fi
+
+    # Extract the improved content from the response
+    local improved_content=$(echo "$api_response" | jq -r '.content[0].text // empty')
+
+    if [ -z "$improved_content" ]; then
+        echo "Error: No content received from Claude API"
+        echo "API Response: $api_response"
+        exit 1
+    fi
+
+    echo "$improved_content"
+}
+
+# Function to call ChatGPT API
+call_chatgpt_api() {
+    local prompt="$1"
+    
+    # Create JSON payload for ChatGPT API
+    local json_payload=$(jq -n \
+        --arg prompt "$prompt" \
+        '{
+            model: "gpt-3.5-turbo",
+            messages: [{
+                role: "user",
+                content: $prompt
+            }],
+            max_tokens: 4000
+        }')
+
+    echo "Sending ADR to OpenAI ChatGPT for improvement..."
+
+    # Make API request to ChatGPT
+    local api_response=$(curl -s -X POST \
+        "https://api.openai.com/v1/chat/completions" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer $OPENAI_API_KEY" \
+        -d "$json_payload")
+
+    # Check if the API call was successful
+    if [ $? -ne 0 ]; then
+        echo "Error: Failed to connect to ChatGPT API"
+        exit 1
+    fi
+
+    # Extract the improved content from the response
+    local improved_content=$(echo "$api_response" | jq -r '.choices[0].message.content // empty')
+
+    if [ -z "$improved_content" ]; then
+        echo "Error: No content received from ChatGPT API"
+        echo "API Response: $api_response"
+        exit 1
+    fi
+
+    echo "$improved_content"
+}
+
+## usage: adr ghostwrite [provider] <adr-file-or-number>
 ##
-## Sends an ADR to Google Gemini AI to expand and improve it.
+## Sends an ADR to an AI service to expand and improve it.
 ## Shows a preview of the suggested changes and asks for confirmation.
-## Requires GEMINI_API_KEY environment variable to be set.
+##
+## Supported providers:
+##   gemini  - Google Gemini (requires GEMINI_API_KEY)
+##   claude  - Anthropic Claude (requires ANTHROPIC_API_KEY)
+##   chatgpt - OpenAI ChatGPT (requires OPENAI_API_KEY)
+##
+## If no provider is specified, defaults to gemini.
 ##
 ## Examples:
 ##   adr ghostwrite 0001-use-database.md
 ##   adr ghostwrite 0001
+##   adr ghostwrite gemini 0001
+##   adr ghostwrite claude 0001-use-database.md
+##   adr ghostwrite chatgpt 0001
 
 adr_dir=$("$adr_bin_dir/_adr_dir")
 
@@ -21,10 +158,25 @@ if [ ! -d "$adr_dir" ]; then
     exit 1
 fi
 
+# Parse arguments to detect provider
+provider="gemini"  # default
+adr_input=""
+
+# Check if first argument is a provider
+if [ $# -ge 1 ]; then
+    case "$1" in
+        gemini|claude|chatgpt)
+            provider="$1"
+            shift
+            ;;
+    esac
+fi
+
 # Check for required arguments
 if [ $# -eq 0 ]; then
     echo "Error: Please specify an ADR file or number."
-    echo "Usage: adr ghostwrite <adr-file-or-number>"
+    echo "Usage: adr ghostwrite [provider] <adr-file-or-number>"
+    echo "Supported providers: gemini (default), claude, chatgpt"
     exit 1
 fi
 
@@ -58,15 +210,35 @@ else
     exit 1
 fi
 
-# Check for API key
-if [ -z "$GEMINI_API_KEY" ]; then
-    echo "Error: GEMINI_API_KEY environment variable is required."
-    echo "Please set your Google Gemini API key:"
-    echo "export GEMINI_API_KEY=your_api_key_here"
-    exit 1
-fi
+# Check for API key based on provider
+case "$provider" in
+    gemini)
+        if [ -z "$GEMINI_API_KEY" ]; then
+            echo "Error: GEMINI_API_KEY environment variable is required for Gemini provider."
+            echo "Please set your Google Gemini API key:"
+            echo "export GEMINI_API_KEY=your_api_key_here"
+            exit 1
+        fi
+        ;;
+    claude)
+        if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "Error: ANTHROPIC_API_KEY environment variable is required for Claude provider."
+            echo "Please set your Anthropic API key:"
+            echo "export ANTHROPIC_API_KEY=your_api_key_here"
+            exit 1
+        fi
+        ;;
+    chatgpt)
+        if [ -z "$OPENAI_API_KEY" ]; then
+            echo "Error: OPENAI_API_KEY environment variable is required for ChatGPT provider."
+            echo "Please set your OpenAI API key:"
+            echo "export OPENAI_API_KEY=your_api_key_here"
+            exit 1
+        fi
+        ;;
+esac
 
-echo "Processing ADR: $adr_file"
+echo "Processing ADR: $adr_file using $provider provider"
 
 # Read the existing ADR content
 if [ ! -r "$adr_file" ]; then
@@ -76,44 +248,27 @@ fi
 
 original_content=$(cat "$adr_file")
 
-# Prepare the prompt for Gemini
+# Prepare the prompt for AI
 prompt="Please expand and improve this Architecture Decision Record (ADR). Keep the same structure but make it more comprehensive and detailed. Enhance the Context, Decision, and Consequences sections with more thorough explanations. Maintain the original title and numbering. Return only the improved ADR content in markdown format:
 
 $original_content"
 
-# Create JSON payload for Gemini API
-json_payload=$(jq -n \
-    --arg prompt "$prompt" \
-    '{
-        contents: [{
-            parts: [{
-                text: $prompt
-            }]
-        }]
-    }')
-
-echo "Sending ADR to Google Gemini for improvement..."
-
-# Make API request to Gemini
-api_response=$(curl -s -X POST \
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=$GEMINI_API_KEY" \
-    -H "Content-Type: application/json" \
-    -d "$json_payload")
-
-# Check if the API call was successful
-if [ $? -ne 0 ]; then
-    echo "Error: Failed to connect to Gemini API"
-    exit 1
-fi
-
-# Extract the improved content from the response
-improved_content=$(echo "$api_response" | jq -r '.candidates[0].content.parts[0].text // empty')
-
-if [ -z "$improved_content" ]; then
-    echo "Error: No content received from Gemini API"
-    echo "API Response: $api_response"
-    exit 1
-fi
+# Call the appropriate API based on provider
+case "$provider" in
+    gemini)
+        improved_content=$(call_gemini_api "$prompt")
+        ;;
+    claude)
+        improved_content=$(call_claude_api "$prompt")
+        ;;
+    chatgpt)
+        improved_content=$(call_chatgpt_api "$prompt")
+        ;;
+    *)
+        echo "Error: Unsupported provider '$provider'"
+        exit 1
+        ;;
+esac
 
 # Create temporary files for comparison
 tmp_dir=$(mktemp -d)
@@ -152,7 +307,7 @@ if ! diff -u "$original_tmp" "$improved_tmp"; then
             ;;
     esac
 else
-    echo "No changes suggested by Gemini."
+    echo "No changes suggested by $provider."
 fi
 
 # Cleanup
