@@ -1,0 +1,155 @@
+#!/bin/bash
+set -e
+eval "$($(dirname $0)/adr-config)"
+
+## usage: adr copilot [TITLE_TEXT...]
+##
+## Interactive assistant for creating Architecture Decision Records (ADRs).
+## 
+## The copilot guides you through the ADR creation process by asking helpful
+## questions about the context, decision, and consequences. It then creates
+## the ADR using the standard adr-new command and opens it for editing.
+##
+## If TITLE_TEXT arguments are provided, they are used as the initial title.
+## Otherwise, you will be prompted to enter a title interactively.
+##
+## The copilot helps ensure your ADR captures:
+## - Clear context and motivation for the decision
+## - The specific decision being made
+## - Expected consequences and trade-offs
+##
+## After the guided questions, the ADR is created and opened in your editor
+## for final review and editing.
+
+# Colors for better UX
+if [ -t 1 ]; then
+    BLUE='\033[0;34m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    NC='\033[0m' # No Color
+else
+    BLUE=''
+    GREEN=''
+    YELLOW=''
+    NC=''
+fi
+
+echo -e "${BLUE}🤖 ADR Copilot - Your Architecture Decision Record Assistant${NC}"
+echo -e "${BLUE}================================================================${NC}"
+echo
+
+# Function to prompt for input
+prompt_for_input() {
+    local prompt="$1"
+    local var_name="$2"
+    local example="$3"
+    
+    echo -e "${YELLOW}$prompt${NC}"
+    if [ -n "$example" ]; then
+        echo -e "${BLUE}Example: $example${NC}"
+    fi
+    echo -n "> "
+    read -r input
+    eval "$var_name=\"\$input\""
+}
+
+# Get title - either from arguments or prompt
+if [ $# -gt 0 ]; then
+    title="$*"
+    echo -e "${GREEN}Using provided title: $title${NC}"
+else
+    prompt_for_input "What is the title of your architecture decision?" "title" "Use microservices architecture for user management"
+fi
+
+if [ -z "$title" ]; then
+    echo "Error: A title is required for the ADR."
+    exit 1
+fi
+
+echo
+echo -e "${GREEN}Great! Let's gather some information to help you write a comprehensive ADR.${NC}"
+echo -e "${BLUE}You can elaborate on these points when the ADR opens in your editor.${NC}"
+echo
+
+# Gather context information
+prompt_for_input "What problem or issue is motivating this decision?" "context" "Our monolithic application is becoming difficult to maintain and scale"
+
+echo
+prompt_for_input "What is the key decision you are making?" "decision" "Split user management functionality into a separate microservice"
+
+echo
+prompt_for_input "What are the main benefits you expect from this decision?" "benefits" "Better scalability, team autonomy, technology flexibility"
+
+echo
+prompt_for_input "What challenges or risks might this decision introduce?" "risks" "Increased complexity, network latency, distributed system challenges"
+
+echo
+echo -e "${GREEN}Perfect! Creating your ADR with the gathered information...${NC}"
+
+# Create a temporary template with the gathered information
+adr_dir=$("$adr_bin_dir/_adr_dir")
+if [ ! -d "$adr_dir" ]; then
+    echo "Error: ADR directory not found. Run 'adr init' first."
+    exit 1
+fi
+
+# Create the ADR using adr-new
+temp_template=$(mktemp)
+cat > "$temp_template" << EOF
+# NUMBER. $title
+
+Date: DATE
+
+## Status
+
+STATUS
+
+## Context
+
+$context
+
+## Decision
+
+$decision
+
+## Consequences
+
+### Benefits
+$benefits
+
+### Risks and Mitigation
+$risks
+
+EOF
+
+# Temporarily replace the template
+original_template=""
+if [ -f "$adr_dir/templates/template.md" ]; then
+    original_template="$adr_dir/templates/template.md"
+    cp "$original_template" "$original_template.backup"
+else
+    mkdir -p "$adr_dir/templates"
+fi
+
+cp "$temp_template" "$adr_dir/templates/template.md"
+
+# Create the ADR
+echo
+echo -e "${GREEN}Creating ADR: $title${NC}"
+adr_file=$("$adr_bin_dir/adr-new" "$title")
+
+# Restore original template
+if [ -n "$original_template" ] && [ -f "$original_template.backup" ]; then
+    mv "$original_template.backup" "$original_template"
+else
+    rm -f "$adr_dir/templates/template.md"
+    rmdir "$adr_dir/templates" 2>/dev/null || true
+fi
+
+# Clean up temp file
+rm -f "$temp_template"
+
+echo
+echo -e "${GREEN}✅ ADR created successfully: $adr_file${NC}"
+echo -e "${BLUE}The ADR has been populated with your input and is now open for editing.${NC}"
+echo -e "${BLUE}Feel free to expand on any section and refine the content.${NC}"

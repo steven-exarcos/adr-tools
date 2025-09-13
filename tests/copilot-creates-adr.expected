@@ -1,0 +1,55 @@
+adr init
+doc/adr/0001-record-architecture-decisions.md
+# Test with pre-provided title
+printf "Our monolithic app is hard to maintain\nSplit into microservices\nBetter scalability and team autonomy\nIncreased complexity and network latency\n" | adr copilot Use microservices architecture
+🤖 ADR Copilot - Your Architecture Decision Record Assistant
+================================================================
+
+Using provided title: Use microservices architecture
+
+Great! Let's gather some information to help you write a comprehensive ADR.
+You can elaborate on these points when the ADR opens in your editor.
+
+What problem or issue is motivating this decision?
+Example: Our monolithic application is becoming difficult to maintain and scale
+> 
+What is the key decision you are making?
+Example: Split user management functionality into a separate microservice
+> 
+What are the main benefits you expect from this decision?
+Example: Better scalability, team autonomy, technology flexibility
+> 
+What challenges or risks might this decision introduce?
+Example: Increased complexity, network latency, distributed system challenges
+> 
+Perfect! Creating your ADR with the gathered information...
+
+Creating ADR: Use microservices architecture
+
+✅ ADR created successfully: doc/adr/0002-use-microservices-architecture.md
+The ADR has been populated with your input and is now open for editing.
+Feel free to expand on any section and refine the content.
+cat doc/adr/0002-use-microservices-architecture.md# 2. Use microservices architecture
+
+Date: 1992-01-12
+
+## Status
+
+Accepted
+
+## Context
+
+Our monolithic app is hard to maintain
+
+## Decision
+
+Split into microservices
+
+## Consequences
+
+### Benefits
+Better scalability and team autonomy
+
+### Risks and Mitigation
+Increased complexity and network latency
+
